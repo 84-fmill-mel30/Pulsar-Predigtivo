@@ -2264,26 +2264,67 @@ const WebBLE = {
           { namePrefix: 'OBD' },
           { namePrefix: 'OBDII' }
         ],
-        optionalServices: [this.SERVICE_UUID, 0xFFE0, 0xFFE5, 0x1800, 0x1801]
-      });
-      if(typeof onConnecting==='function') onConnecting(this.device.name||'V-Link');
-      this.device.addEventListener('gattserverdisconnected', function(){
-        if(typeof onDisconnected==='function') onDisconnected();
-      });
-      this.server = await this.device.gatt.connect();
-      // Try FFF0 first, then FFE0 (common alternates)
-      var service;
-      try{ service = await this.server.getPrimaryService(this.SERVICE_UUID); }
-      catch(e){
-        try{ service = await this.server.getPrimaryService(0xFFE0); }
-        catch(e2){ throw new Error('Servicio BLE no encontrado en el adaptador'); }
-      }
-      // Try FFF2/FFF1 first, then FFE1 (common alternates)
-      try{
-        this.writeChar = await service.getCharacteristic(this.WRITE_UUID);
-        this.notifyChar = await service.getCharacteristic(this.NOTIFY_UUID);
-      } catch(e){
-        try{
+
+        // ================================================================
+// CONFIGURACIÓN DE PROTOCOLO V-LINK 4.0 (BLE)
+// ================================================================
+const VLINK_SERVICE_UUID = "0000ffe0-0000-1000-8000-00805f9b34fb";
+const VLINK_CHARACTERISTIC_UUID = "0000ffe1-0000-1000-8000-00805f9b34fb";
+
+async function tgConn() {
+  // Si ya estamos conectados, cortamos la corriente
+  if (connected && vlinkDevice) {
+    await vlinkDevice.gatt.disconnect();
+    onDisconnected();
+    return;
+  }
+
+  try {
+    document.getElementById('cst').textContent = 'BUSCANDO V-LINK...';
+    
+    // 1. Buscamos el dispositivo
+    const device = await navigator.bluetooth.requestDevice({
+      filters: [{ namePrefix: 'V-LINK' }, { namePrefix: 'OBDII' }],
+      optionalServices: [VLINK_SERVICE_UUID]
+    });
+
+    vlinkDevice = device;
+    onConnecting(device.name);
+
+    // 2. Conectamos al servidor GATT
+    const server = await device.gatt.connect();
+
+    // 3. Obtenemos el servicio y la manguera de datos (characteristic)
+    const service = await server.getPrimaryService(VLINK_SERVICE_UUID);
+    vlinkCharacteristic = await service.getCharacteristic(VLINK_CHARACTERISTIC_UUID);
+
+    // 4. Activamos las notificaciones para recibir la respuesta de la ECU
+    await vlinkCharacteristic.startNotifications();
+    vlinkCharacteristic.addEventListener('characteristicvaluechanged', (event) => {
+        const value = new TextDecoder().decode(event.target.value);
+        onOBDResponse(value); // Mandamos la respuesta al traductor que ya tenemos
+    });
+
+    // 5. Inicialización Master (Comandos AT)
+    enviarComandoVLink("AT Z");      // Reset
+    setTimeout(() => enviarComandoVLink("AT SP 0"), 500); // Protocolo Automático
+    
+    onConnected(device.name);
+    alert("¡V-Link enlazado! Sistema ProPart V7 en línea, carnal.");
+
+  } catch (error) {
+    console.error("Error de conexión BLE:", error);
+    onBLEError("Fallo: " + error.message);
+  }
+}
+
+// Función auxiliar para enviar comandos sin repetir código
+function enviarComandoVLink(cmd) {
+    if (!vlinkCharacteristic) return;
+    const encoder = new TextEncoder();
+    vlinkCharacteristic.writeValue(encoder.encode(cmd + '\r'));
+}
+       try{
           var chars = await service.getCharacteristics();
           if(chars.length>=2){
             this.writeChar = chars[0];
