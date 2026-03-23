@@ -1557,60 +1557,20 @@ Mano de obra reparación vacío: $250</textarea>
 </div>
 
 <script>
-
-  import com.propart.diagnostic.profesional.BleManager;
-import android.bluetooth.BluetoothDevice;
-
-public class MainActivity extends AppCompatActivity implements BleManager.BleCallback {
-
-    private BleManager bleManager;
-    private static final int REQUEST_BLUETOOTH_PERMISSIONS = 100;
-
-    @Override
-    protected void onCreate(Bundle savedInstanceState) {
-        super.onCreate(savedInstanceState);
-        setContentView(R.layout.activity_main);
-
-        // Inicializar BleManager
-        bleManager = new BleManager(this, this);
-
-        // Botón conectar OBD2
-        btnConectar.setOnClickListener(v -> {
-            if (bleManager.tienePermisos()) {
-                bleManager.escanear();
-            } else {
-                pedirPermisos();
-            }
-        });
-
-        // Botón leer RPM
-        btnLeerRPM.setOnClickListener(v -> {
-            if (bleManager.estaConectado()) {
-                bleManager.enviarComando(BleManager.CMD_RPM);
-            }
-        });
-
-        // Botón leer temperatura
-        btnLeerTemp.setOnClickListener(v -> {
-            if (bleManager.estaConectado()) {
-                bleManager.enviarComando(BleManager.CMD_COOLANT);
-            }
-        });
-
-        // Botón leer voltaje
-        btnVoltaje.setOnClickListener(v -> {
-            if (bleManager.estaConectado()) {
-                bleManager.enviarComando(BleManager.CMD_VOLTAGE);
-            }
-        });
-
-        // Botón leer DTCs
-        btnDTC.setOnClickListener(v -> {
-            if (bleManager.estaConectado()) {
-                bleManager.enviarComando(BleManager.CMD_DTC);
-            }
-        });
-    }
+  Gestor de conexión Bluetooth con ELM327 (vLink compatible)
+ * Soporta Bluetooth 4.0 y chips chinos genéricos
+ */
+public class ELM327Manager {
+    private static final String TAG = "ELM327Manager";
+    
+    // UUID estándar para dispositivos serie Bluetooth (SPP)
+    private static final UUID SPP_UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB");
+    
+    // Nombres comunes de dispositivos ELM327/vLink chinos
+    private static final String[] DEVICE_NAMES = {
+        "OBDII", "OBD2", "ELM327", "vLinker", "vLink", "V-LINK",
+        "CHX", "VGATE", "KONNWEI", "VEEPEAK"
+    };
 
     // ── Callbacks BLE ──────────────────────────────────────────────
     @Override
@@ -1645,33 +1605,7 @@ public class MainActivity extends AppCompatActivity implements BleManager.BleCal
     }
 
     @Override
-    public void onDatosRecibidos(String datos) {
-        runOnUiThread(() -> {
-            // Parsear según el último comando enviado
-            // Ejemplo: si pediste RPM
-            int rpm = BleManager.parsearRPM(datos);
-            if (rpm >= 0) {
-                txtRPM.setText(String.valueOf(rpm));
-            }
-
-            int velocidad = BleManager.parsearVelocidad(datos);
-            if (velocidad >= 0) {
-                txtVelocidad.setText(velocidad + " km/h");
-            }
-
-            int temp = BleManager.parsearTemperatura(datos);
-            if (temp > -900) {
-                txtTemp.setText(temp + "°C");
-            }
-
-            float voltaje = BleManager.parsearVoltaje(datos);
-            if (voltaje > 0) {
-                txtVoltaje.setText(voltaje + "V");
-            }
-
-            Log.d("OBD2", "Respuesta raw: " + datos);
-        });
-    }
+    
 
     @Override
     public void onError(String error) {
@@ -1681,19 +1615,7 @@ public class MainActivity extends AppCompatActivity implements BleManager.BleCal
     }
 
     // ── Pedir permisos en runtime ───────────────────────────────────
-    private void pedirPermisos() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            requestPermissions(new String[]{
-                Manifest.permission.BLUETOOTH_SCAN,
-                Manifest.permission.BLUETOOTH_CONNECT
-            }, REQUEST_BLUETOOTH_PERMISSIONS);
-        } else {
-            requestPermissions(new String[]{
-                Manifest.permission.ACCESS_FINE_LOCATION
-            }, REQUEST_BLUETOOTH_PERMISSIONS);
-        }
-    }
-
+    
     @Override
     public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
