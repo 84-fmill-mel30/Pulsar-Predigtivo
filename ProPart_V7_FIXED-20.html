@@ -696,26 +696,16 @@ body.graf-fs .main{overflow:visible!important}
   </div><!-- /scan -->
 
   <!-- ══ DTC ══ -->
-  <div class="pg" id="pg-dtc">
-    <div class="g g21">
-      <div class="card">
-        <div class="ch">
-          <span class="ci">⚠️</span><span class="ct2">CÓDIGOS DTC</span><span class="tag tr" id="dtcCountTag">0 DETECTADOS</span>
-        </div>
-        <div style="display:flex;gap:6px;padding:8px 10px;border-bottom:1px solid var(--bdr)">
-          <button class="bb red" style="flex:1;min-height:32px;padding:0" id="dtcModeDetected" onclick="setDtcView('detected')"><div class="bb-l" style="font-size:10px">🔴 DETECTADOS</div></button>
-          <button class="bb cyan" style="flex:1;min-height:32px;padding:0" id="dtcModeRef" onclick="setDtcView('reference')"><div class="bb-l" style="font-size:10px">📖 REFERENCIA</div></button>
-        </div>
-        <div class="cb" id="dtcList">
-          <!-- populated by JS -->
-        </div>
-      </div>
-      <div class="card" id="dtcDetail">
-        <div class="ch"><span class="ci">🔬</span><span class="ct2">DETALLE DTC</span><span class="tag tg" id="dtcDetailCode">P0101</span></div>
-        <div class="cb" id="dtcDetailBody"></div>
-      </div>
-    </div>
-  </div><!-- /dtc -->
+  // PEGA ESTO: Lógica real de lectura
+detectedDTCcodes = []; // Limpiamos para recibir la verdad
+if (hasBLE() && getBLE().isConnected()) {
+    lbl.textContent = 'LEYENDO ECU REAL...';
+    getBLE().sendCommand('03'); // Comando OBD2 para leer fallas
+    sub.textContent = 'Esperando respuesta de la computadora del motor...';
+} else {
+    lbl.textContent = 'MODO DEMO ACTIVO';
+    sub.textContent = 'Conecte V-Link para ver fallas reales.';
+}
 
   <!-- ══ LIVE ══ -->
   <div class="pg" id="pg-live">
@@ -3168,6 +3158,23 @@ function onELMReady(msg){
 function onOBDResponse(raw){
   if(!raw) return;
   const r=raw.trim().replace(/\s+/g,'');
+  // --- INICIO CIRUGÍA CHARDS: TRADUCTOR DE VIN ---
+  if (r.startsWith('4902')) {
+      let vinStr = "";
+      // El protocolo 0902 manda el VIN en Hexadecimal, aquí lo pasamos a letras
+      for (let i = 4; i < r.length; i += 2) {
+          let code = parseInt(r.substr(i, 2), 16);
+          if (code > 31 && code < 127) vinStr += String.fromCharCode(code);
+      }
+      if (vinStr.length > 5) {
+          // Esto actualiza el cuadro azul de arriba y el historial
+          if(document.getElementById('vinb')) document.getElementById('vinb').textContent = vinStr;
+          if(document.getElementById('vinDisplay')) document.getElementById('vinDisplay').textContent = 'VIN: ' + vinStr;
+          detectedVIN = vinStr;
+          console.log("¡VIN capturado con éxito, carnal!: " + vinStr);
+      }
+  }
+  // --- FIN CIRUGÍA ---
   // RPM: 410C → ((AA*256)+BB)/4
   if(r.startsWith('410C') && r.length>=8){
     const aa=parseInt(r.substr(4,2),16), bb=parseInt(r.substr(6,2),16);
@@ -4290,19 +4297,32 @@ function loadChardsNameInput(){
   var supInp=document.getElementById('supportURLInput');
   if(supInp) supInp.value=supportURL;
 }
-function saveSupportURL(){
-  var inp=document.getElementById('supportURLInput');
-  var url=inp?.value?.trim();
-  if(!url){url='https://gemini.google.com/gem/1mVsif6WjZt1XBqJ7UQKRMcWsaZDrk_72?usp=sharing';inp.value=url;}
-  supportURL=url;
-  _saveSetting('supportURL',url);
-  alert('✅ URL de soporte actualizada');
+function openSupport() {
+  // En lugar de window.open, inyectamos el soporte en un modal
+  const mTitle = document.getElementById('mTitle');
+  const mBody = document.getElementById('mBody');
+  
+  mTitle.textContent = "CHARDS MASTER — SOPORTE TÉCNICO 24/7";
+  mTitle.style.color = "var(--green)";
+  
+  mBody.innerHTML = `
+    <div style="height:70vh; width:100%; overflow:hidden; border-radius:8px;">
+      <iframe src="${supportURL}" 
+              style="width:100%; height:100%; border:none;" 
+              allow="camera; microphone">
+      </iframe>
+    </div>
+    <div style="margin-top:10px; font-size:10px; color:var(--txtD); text-align:center;">
+      Maestro Chards en línea. No cierres la ventana hasta terminar la consulta.
+    </div>
+  `;
+  document.getElementById('modalOver').classList.add('show');
 }
 
 // --- CHARDS FAB DRAGGABLE ---
 (function(){
   var fab=null,container=null,dragging=false,wasDragged=false;
-  var startX=0,startY=0,origX=0,origY=0;
+  var startX=0,startY=0,origX=0,origY=0; la 
   
   function init(){
     fab=document.getElementById('chardsFab');
@@ -4599,10 +4619,12 @@ function buildSensorPanel(){
 function refreshAllPIDs(){
   if(!connected||!hasBLE()) return;
   var ble=getBLE();
-  // Secuencia completa: RPM, ECT, IAT, MAP, TPS, Carga, MAF, STFT, LTFT, O2, Vel, Batería, Runtime
-  const cmds=['010C','0105','010F','010B','0111','0104','0110','0106','0107','0114','010D','ATRV','011F','0149'];
-  cmds.forEach((cmd,i)=>setTimeout(()=>ble.sendCommand(cmd),i*130));
-}
+  const LIVE_PIDS=[
+  {id:'rpm',name:'RPM',unit:'RPM',color:'var(--gold)',base:0,range:[0,8000]},
+  {id:'ect',name:'TEMP',unit:'°C',color:'var(--green)',base:0,range:[-40,215]},
+  {id:'bat',name:'BATERÍA',unit:'V',color:'var(--cyan)',base:0,range:[0,18]},
+  // ... haz lo mismo con los demás, ponlos en 0 para que no mientan
+];
 
 
 async function sendChards(){
@@ -6553,12 +6575,27 @@ window.addEventListener('load',()=>{
   if(savedUrl) supportURL=savedUrl;
 });
 
-// ═══ SOPORTE 24/7 — GEMINI GEM ═══
-var supportURL='https://gemini.google.com/gem/1mVsif6WjZt1XBqJ7UQKRMcWsaZDrk_72?usp=sharing';
-function openSupport(){
-  window.open(supportURL,'_blank');
-}
-
+function openSupport() {
+  // En lugar de window.open, inyectamos el soporte en un modal
+  const mTitle = document.getElementById('mTitle');
+  const mBody = document.getElementById('mBody');
+  
+  mTitle.textContent = "CHARDS MASTER — SOPORTE TÉCNICO 24/7";
+  mTitle.style.color = "var(--green)";
+  
+  mBody.innerHTML = `
+    <div style="height:70vh; width:100%; overflow:hidden; border-radius:8px;">
+      <iframe src="${supportURL}" 
+              style="width:100%; height:100%; border:none;" 
+              allow="camera; microphone">
+      </iframe>
+    </div>
+    <div style="margin-top:10px; font-size:10px; color:var(--txtD); text-align:center;">
+      Maestro Chards en línea. No cierres la ventana hasta terminar la consulta.
+    </div>
+  `;
+  document.getElementById('modalOver').classList.add('show');
+  }
 // ═══ GRÁFICAS PANTALLA COMPLETA ═══
 var grafFullscreen=false;
 function toggleGrafFullscreen(){
@@ -8223,7 +8260,34 @@ Object.values(FSM34_DATA).forEach(function(m){
 });
 console.log('[PROPART] FSM34 MODELO 100: BT-50/Ranger 2.2 | 16 pines | 3 DTCs');
 })();
+  // ... (aquí terminan tus bases de datos FSM34, etc.)
+    console.log('[PROPART] FSM34 MODELO 100: BT-50/Ranger 2.2 | 16 pines | 3 DTCs');
+})(); 
 
+// 👇 AQUÍ MERO PEGA EL CÓDIGO DE CHARDS 👇
+
+// ================================================================
+// CHARDS MASTER — LÓGICA DE SOPORTE INTEGRADA (NO SALIR DE APP)
+// ================================================================
+function openSupport() {
+  const mTitle = document.getElementById('mTitle');
+  const mBody = document.getElementById('mBody');
+  if(!mTitle || !mBody) return;
+  mTitle.textContent = "🤖 CHARDS MASTER — SOPORTE TÉCNICO 24/7";
+  mTitle.style.color = "var(--gold)";
+  mBody.innerHTML = `
+    <div style="height:75vh; width:100%; overflow:hidden; border-radius:10px; border:1px solid var(--bdr);">
+      <iframe src="${supportURL}" 
+              style="width:100%; height:100%; border:none;" 
+              allow="camera; microphone; bluetooth">
+      </iframe>
+    </div>
+    <div style="margin-top:10px; font-size:11px; color:var(--txtD); text-align:center; font-family:'Share Tech Mono';">
+      CONECTADO A LA RED PROPART — ASISTENCIA EN VIVO
+    </div>`;
+  document.getElementById('modalOver').classList.add('show');
+}
+console.log("¡Chards Master reportándose! Soporte interno listo, carnal.");
 
 </script>
 </body>
